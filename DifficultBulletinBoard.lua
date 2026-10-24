@@ -656,6 +656,19 @@ function DBB2:GetHighlightColor()
   return c.r, c.g, c.b, c.a
 end
 
+-- Shared by the slash command, minimap button and user-assigned key binding.
+function DBB2:ToggleGUI()
+  if not self.gui then return end
+  if self.gui:IsShown() then
+    self.gui:Hide()
+  else
+    self.gui:Show()
+  end
+end
+
+BINDING_HEADER_DBB2 = "DifficultBulletinBoard"
+BINDING_NAME_DBB2_TOGGLE = "Toggle Bulletin Board"
+
 -- Slash command to toggle GUI
 SLASH_DBB1 = "/dbb"
 SlashCmdList["DBB"] = function(msg)
@@ -667,12 +680,6 @@ SlashCmdList["DBB"] = function(msg)
     return
   end
 
-  if DBB2.gui then
-    if DBB2.gui:IsShown() then
-      DBB2.gui:Hide()
-    else
-      DBB2.gui:Show()
-    end
-  end
+  DBB2:ToggleGUI()
 end
 

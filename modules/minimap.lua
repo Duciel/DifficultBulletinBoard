@@ -101,11 +101,7 @@ DBB2:RegisterModule("minimap", function()
   -- Click handler
   DBB2.minimapButton:SetScript("OnClick", function()
     if arg1 == "LeftButton" then
-      if DBB2.gui:IsShown() then
-        DBB2.gui:Hide()
-      else
-        DBB2.gui:Show()
-      end
+      DBB2:ToggleGUI()
     elseif arg1 == "RightButton" and IsControlKeyDown() then
       -- Reset position to default (locked mode, 45 degrees)
       DBB2.minimapButton.angle = 45
