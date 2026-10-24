@@ -223,6 +223,23 @@ function DBB2.api.UpdateCategoryTags(categoryType, categoryName, newTags)
   return false
 end
 
+-- Category exclusions are saved alongside tags and apply to every matching path.
+function DBB2.api.UpdateCategoryExcludeTags(categoryType, categoryName, tags)
+  local cat = DBB2.api.GetCategoryByName(categoryType, categoryName)
+  if not cat then return false end
+  tags = tags or {}
+  local previous = cat.excludeTags or {}
+  local changed = table_getn(previous) ~= table_getn(tags)
+  for i, tag in ipairs(tags) do
+    if previous[i] ~= tag then changed = true break end
+  end
+  if not changed then return true end
+  cat.excludeTags = tags
+  ResetCategorizeCache()
+  DBB2.api.DebugUITransition("category-blacklist-changed", "type=" .. categoryType .. " category=" .. categoryName .. " blacklistTags=[" .. table_concat(tags, ",") .. "]")
+  return true
+end
+
 -- [ EnsureTagsPrecomputed ]
 -- Ensures a category has pre-computed lowercase tags
 -- Called internally before matching
@@ -622,6 +639,12 @@ function DBB2.api.MatchMessageToCategory(message, category, ignoreSelected, cate
   local lowerMsg = LowerMsg(message or "")
   if lowerMsg == "" then return false end
   
+  local exclusionEvidence = evidence and {} or nil
+  local excluded = MatchFilterTagList(message, category.excludeTags, exclusionEvidence)
+  if excluded and not evidence then return false end
+  -- Diagnostic scans continue through positive tags so they can explain both
+  -- what would have matched and exactly which blacklist tag vetoed it.
+
   -- Check filter tags first (if enabled for this category type)
   -- This is an AND condition - message must match BOTH filter tags AND category tags
   if not ignoreFilterTags and categoryType and (categoryType == "groups" or categoryType == "professions") then
@@ -810,6 +833,16 @@ function DBB2.api.MatchMessageToCategory(message, category, ignoreSelected, cate
         startPos = foundPos + 1
       end
     end  -- end else (plain text matching)
+  end
+  if matched and excluded then
+    for _, item in ipairs(exclusionEvidence) do
+      table_insert(evidence.rejected, {
+        tag = item.tag,
+        kind = item.kind == "filter-tag wildcard" and "category blacklist wildcard" or "category blacklist tag"
+      })
+    end
+    evidence.blacklistRejected = true
+    return false
   end
   return matched
 end

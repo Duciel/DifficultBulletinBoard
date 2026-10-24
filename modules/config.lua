@@ -131,6 +131,9 @@ DBB2:RegisterModule("config", function()
           end
         end
       end
+      if panel and panel.categoryExclusionControls then
+        for _, control in ipairs(panel.categoryExclusionControls) do control.Save() end
+      end
       if panel and panel.filterTagsInput and panel.filterCategoryType then
         DBB2.api.UpdateFilterTags(panel.filterCategoryType, DBB2.api.ParseTagsString(panel.filterTagsInput:GetText()))
       end

@@ -12,6 +12,7 @@ RIP Turtle 2018-2026 🐢 2026 - 🐙
 - **Hardcore Messages**: Stay updated with hardcore-related events, such as deaths or level-ups.
 - **Auto-detect Hardcore Chat**: Show only messages aimed at hardcore characters.
 - **Blacklist Filter**: Hide all messages matching your blacklist.
+- **Category Exclusions**: Click into a category tag field to reveal blacklist tags for excluding messages and notifications from that category.
 - **Expiration Date**: Set an expiration date to automatically delete old messages—or turn automatic deletion off entirely.
 - **Collapsible Topics**: Collapse topics to hide unwanted messages and keep your feed tidy.
 - **Notification System**: Be notified if an entry gets added to a specific topic.

@@ -402,21 +402,126 @@ function RenderCategoryList(parent, panel, item, x, y)
     return math.max(minHeight, math.ceil(label:GetHeight() or 0))
   end
 
+  -- Keep configured exclusions visible. Defer closing empty fields until the next update so
+  -- moving focus between the two inputs never collapses the field mid-click.
+  local exclusionInputGap = DBB2:ScaleSize(3)
+  local exclusionControls = {}
+  local function AddExclusionControl(input)
+    local control = { input = input, expanded = false, count = 0 }
+    local excludedInput = CreateConfigInput(nil, input:GetParent())
+    control.excludeInput = excludedInput
+    excludedInput:SetPoint("TOPLEFT", input, "BOTTOMLEFT", 0, -exclusionInputGap)
+    excludedInput:SetPoint("TOPRIGHT", input, "BOTTOMRIGHT", 0, -exclusionInputGap)
+    excludedInput:SetHeight(inputHeight)
+    excludedInput:SetTextColor(1, 0.5, 0.5, 1)
+    excludedInput.placeholder = excludedInput:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    excludedInput.placeholder:SetFont("Fonts\\FRIZQT__.TTF", DBB2:GetFontSize(FONT_SIZE_INPUT))
+    excludedInput.placeholder:SetPoint("LEFT", DBB2:ScaleSize(6), 0)
+    excludedInput.placeholder:SetText("Blacklist tags")
+    excludedInput.placeholder:SetTextColor(0.4, 0.4, 0.4, 1)
+    local function UpdatePlaceholder()
+      if excludedInput:GetText() == "" then
+        excludedInput.placeholder:Show()
+      else
+        excludedInput.placeholder:Hide()
+      end
+    end
+    excludedInput:SetScript("OnTextChanged", UpdatePlaceholder)
+    excludedInput:Hide()
+    function control.Save()
+      if not control.categoryName then return end
+      local tags = DBB2.api.ParseTagsString(excludedInput:GetText())
+      DBB2.api.UpdateCategoryExcludeTags(categoryType, control.categoryName, tags)
+      control.count = table_getn(tags)
+    end
+    function control.Bind(cat)
+      control.categoryName = cat.name
+      control.count = table_getn(cat.excludeTags or {})
+      control.expanded = control.focused or control.excludeFocused or control.count > 0
+      if not control.excludeFocused then
+        excludedInput:SetText(DBB2.api.TagsToString(cat.excludeTags))
+      end
+      UpdatePlaceholder()
+      if control.expanded then excludedInput:Show() else excludedInput:Hide() end
+    end
+    function control.ExtraHeight()
+      return control.expanded and (exclusionInputGap + inputHeight) or 0
+    end
+    function control.Open()
+      control.pendingClose = false
+      if control.expanded then return end
+      control.expanded = true
+      if panel.RebuildDynamicContent then panel.RebuildDynamicContent() end
+    end
+    function control.LoseTagFocus()
+      control.focused = false
+      control.pendingClose = true
+    end
+    input:SetScript("OnEditFocusGained", function()
+      control.focused = true
+      control.Open()
+    end)
+    local function AddTooltip(field)
+      local oldEnter, oldLeave = field:GetScript("OnEnter"), field:GetScript("OnLeave")
+      field:SetScript("OnEnter", function()
+        if oldEnter then oldEnter() end
+        local lines = {{"Blacklist Tags", "highlight"}, "Edit this category's tags to open its blacklist field.", "Comma-separated words or phrases. Wildcards are supported.", "Matching messages are excluded from this category and its notifications. Other categories are unaffected."}
+        if control.count > 0 then
+          table_insert(lines, {"Excluded: " .. DBB2.api.TagsToString(DBB2.api.GetCategoryByName(categoryType, control.categoryName).excludeTags), "gray"})
+        end
+        DBB2.api.ShowTooltip(this, "RIGHT", lines)
+      end)
+      field:SetScript("OnLeave", function()
+        if oldLeave then oldLeave() end
+        DBB2.api.HideTooltip()
+      end)
+    end
+    AddTooltip(excludedInput)
+    excludedInput:SetScript("OnEditFocusGained", function()
+      control.excludeFocused = true
+      control.Open()
+    end)
+    excludedInput:SetScript("OnEnterPressed", function() this:ClearFocus() end)
+    excludedInput:SetScript("OnEditFocusLost", function()
+      control.Save()
+      control.excludeFocused = false
+      control.pendingClose = true
+    end)
+    excludedInput:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+    table_insert(exclusionControls, control)
+    return control
+  end
+  container:SetScript("OnUpdate", function()
+    local changed = false
+    for _, control in ipairs(exclusionControls) do
+      if control.pendingClose then
+        control.pendingClose = false
+        if not control.focused and not control.excludeFocused and control.count == 0 and control.expanded then
+          control.expanded = false
+          changed = true
+        end
+      end
+    end
+    if changed and panel.RebuildDynamicContent then panel.RebuildDynamicContent() end
+  end)
+  panel.categoryExclusionControls = exclusionControls
+
   local function CreateCategoryRow()
     local row = CreateFrame("Frame", nil, container)
     row:SetHeight(rowHeight)
     row.check = DBB2.schema.CreateCheckBox(nil, row)
-    row.check:SetPoint("LEFT", 0, 0)
+    row.check:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -(rowHeight - checkSize) / 2)
     row.check:SetWidth(checkSize)
     row.check:SetHeight(checkSize)
     row.nameLabel = DBB2.schema.CreateLabel(row, "", FONT_SIZE)
     row.nameLabel:SetPoint("LEFT", row.check, "RIGHT", 8, 0)
     row.nameLabel:SetWidth(nameWidth)
     row.tagsInput = CreateConfigInput(nil, row)
-    row.tagsInput:SetPoint("LEFT", row.nameLabel, "RIGHT", 5, 0)
-    row.tagsInput:SetPoint("RIGHT", row, "RIGHT", -DBB2:ScaleSize(5), 0)
+    row.tagsInput:SetPoint("TOPLEFT", row, "TOPLEFT", checkSize + nameWidth + 13, -(rowHeight - inputHeight) / 2)
+    row.tagsInput:SetPoint("TOPRIGHT", row, "TOPRIGHT", -DBB2:ScaleSize(5), -(rowHeight - inputHeight) / 2)
     row.tagsInput:SetHeight(inputHeight)
     row.tagsInput:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+    row.exclusions = AddExclusionControl(row.tagsInput)
     return row
   end
 
@@ -497,14 +602,20 @@ function RenderCategoryList(parent, panel, item, x, y)
     customInput:ClearAllPoints()
     customInput:SetPoint("TOPLEFT", customToggle, "BOTTOMLEFT", 0, -customInputGap)
     customInput:SetPoint("RIGHT", container, "RIGHT", -DBB2:ScaleSize(5), 0)
-    customInput:SetText(DBB2.api.TagsToString(customCategory.tags))
+    if not customInput.exclusions or not customInput.exclusions.focused then
+      customInput:SetText(DBB2.api.TagsToString(customCategory.tags))
+    end
     customInput:SetScript("OnEnterPressed", function()
       DBB2.api.UpdateCategoryTags(categoryType, customCategory.name, DBB2.api.ParseTagsString(this:GetText()))
       this:ClearFocus()
     end)
     customInput:SetScript("OnEditFocusLost", function()
+      if customInput.exclusions then customInput.exclusions.LoseTagFocus() end
       DBB2.api.UpdateCategoryTags(categoryType, customCategory.name, DBB2.api.ParseTagsString(this:GetText()))
     end)
+    if not customInput.exclusions then customInput.exclusions = AddExclusionControl(customInput) end
+    customInput.exclusions.Bind(customCategory)
+    customSectionHeight = customSectionHeight + customInput.exclusions.ExtraHeight()
     return customSectionHeight
   end
 
@@ -575,7 +686,7 @@ function RenderCategoryList(parent, panel, item, x, y)
       row.nameLabel:SetText(cat.name)
       row.nameLabel:SetTextColor(1, 1, 1, 1)
       row.check:SetChecked(cat.selected)
-      row.tagsInput:SetText(DBB2.api.TagsToString(cat.tags))
+      if not row.exclusions.focused then row.tagsInput:SetText(DBB2.api.TagsToString(cat.tags)) end
       
       row.check.OnChecked = function(checked)
         DBB2.api.SetCategorySelected(row.categoryType, row.categoryName, checked)
@@ -585,10 +696,13 @@ function RenderCategoryList(parent, panel, item, x, y)
         this:ClearFocus()
       end)
       row.tagsInput:SetScript("OnEditFocusLost", function()
+        row.exclusions.LoseTagFocus()
         DBB2.api.UpdateCategoryTags(row.categoryType, row.categoryName, DBB2.api.ParseTagsString(this:GetText()))
       end)
       
-      currentY = currentY - rowHeight
+      row.exclusions.Bind(cat)
+      row:SetHeight(rowHeight + row.exclusions.ExtraHeight())
+      currentY = currentY - row:GetHeight()
     end
     
     -- Hide extra rows
@@ -601,7 +715,7 @@ function RenderCategoryList(parent, panel, item, x, y)
       if panel.categoryRows[i] then panel.categoryRows[i]:Hide() end
     end
     
-    totalHeight = activeFilterRowHeight + effectiveCustomHeight + categorySectionHeight + (catCount * rowHeight)
+    totalHeight = -currentY
     if totalHeight < rowHeight then totalHeight = rowHeight end
     container:SetHeight(totalHeight)
   end

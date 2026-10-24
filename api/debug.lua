@@ -105,6 +105,7 @@ function DBB2.api.DebugFormatCategoryEvidence(evidenceByType)
       local description = categoryResult.name
       if via[1] then description = description .. " via " .. table.concat(via, ",") end
       if filters[1] then description = description .. " filter=" .. table.concat(filters, ",") end
+      if evidence.blacklistRejected then description = description .. " category-blacklist rejected" end
       if evidence.filterRejected then description = description .. " filter-tag rejected" end
       if rejected[1] then description = description .. " rejected=" .. table.concat(rejected, ",") end
       table_insert(entries, description)
@@ -349,6 +350,7 @@ end
 function DBB2.api.DebugUITransition(action, details)
   if not debugState.enabled or debugState.paused then return end
   if action == "level-filter-changed" or action == "category-tags-changed" or
+     action == "category-blacklist-changed" or
      action == "category-selection-changed" or action == "filter-tags-changed" or
      action == "filter-tags-enabled-changed" or action == "duplicate-filter-mode-changed" or
      action == "duplicate-filter-window-changed" or action == "channel-monitoring-changed" then
@@ -1104,6 +1106,7 @@ function DBB2.api.DebugGetConfigurationSummary(reason)
     ",hardcore:" .. tostring(DBB2_Config.hardcoreVersion or versions.HARDCORE or 0) ..
     ",blacklist:" .. tostring(DBB2_Config.blacklistVersion or versions.BLACKLIST or 0)
   local categoryCounts = {}
+  local categoryBlacklistCounts = {}
   local hideFromChat = DBB2_Config.hideFromChat or 0
   local hideFromChatNames = { [0] = "Disabled", [1] = "Filtered", [2] = "All" }
   local duplicateMode = DBB2_Config.duplicateFilterMode
@@ -1112,9 +1115,12 @@ function DBB2.api.DebugGetConfigurationSummary(reason)
   for _, categoryType in ipairs({ "groups", "professions", "hardcore" }) do
     local categories = DBB2_Config.categories and DBB2_Config.categories[categoryType] or {}
     local selected = 0
+    local blacklistTags = 0
     for _, category in ipairs(categories) do
       if category.selected then selected = selected + 1 end
+      blacklistTags = blacklistTags + table_getn(category.excludeTags or {})
     end
+    table_insert(categoryBlacklistCounts, categoryType .. ":" .. blacklistTags)
     table_insert(categoryCounts, categoryType .. ":" .. selected .. "/" .. table_getn(categories))
   end
   local detail = "reason=" .. (reason or "manual") ..
@@ -1136,6 +1142,7 @@ function DBB2.api.DebugGetConfigurationSummary(reason)
     " playerLevel=" .. tostring(playerLevel) ..
     " faction=" .. tostring(playerFaction) ..
     " categoryVersions=[" .. categoryVersions .. "]" ..
+    " categoryBlacklistTags=[" .. table.concat(categoryBlacklistCounts, ",") .. "]" ..
     " categorySelection=[" .. table.concat(categoryCounts, ",") .. "] " ..
     DBB2.api.DebugGetUIStateSummary()
   return detail
@@ -1368,10 +1375,29 @@ function DBB2.api.DebugAnalyzeMessage(message, sender, channel, msgType)
     blacklistDetail = (reason or "yes") .. ":" .. tostring(details or "")
   end
 
+  -- Predict the first eligible category without sending an alert or changing
+  -- notification state. Storage rejections and unsorted entries never notify.
+  local notificationCategory = "none"
+  if outcome == "stored-categorized" then
+    for _, categoryType in ipairs({ "groups", "professions", "hardcore" }) do
+      if msgType ~= "CHAT_MSG_SYSTEM" or categoryType == "hardcore" then
+        for _, category in ipairs(DBB2.api.GetCategories(categoryType)) do
+          if DBB2.api.IsNotificationEnabled(categoryType, category.name) and
+             DBB2.api.MatchMessageToCategory(message, category, nil, categoryType) then
+            notificationCategory = categoryType .. ":" .. category.name
+            break
+          end
+        end
+      end
+      if notificationCategory ~= "none" then break end
+    end
+  end
+
   local detail = "chat=" .. (hidden and "hidden" or "visible") ..
     " chatReason=\"" .. tostring(chatReason or "unknown") .. "\"" ..
     " chatDetails=\"" .. tostring(chatDetails or "none") .. "\"" ..
     " storage=" .. outcome ..
+    " notificationCategory=\"" .. notificationCategory .. "\"" ..
     " sourceAccepted=" .. tostring(sourceAccepted) ..
     " sourceReason=\"" .. sourceReason .. "\"" ..
     " sender=" .. sender ..
